@@ -5,7 +5,6 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# این دو تایپ باید دقیقاً وجود داشته باشند:
 AssetName = Literal["gold", "dow", "bitcoin"]
 ReportMode = Literal["daily", "weekly"]
 
