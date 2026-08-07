@@ -53,7 +53,7 @@ SAME_MODEL_RETRY_DELAY_SECONDS = 2.0
 # same disclaimer + channel line but differ in the middle "what this is"
 # line, so the footer is built per report type rather than being one
 # fixed constant.
-TELEGRAM_CHANNEL_URL = "https://t.me/test5tts"
+TELEGRAM_CHANNEL_URL = "https://t.me/akarfxanalytics"
 _DISCLAIMER_LINE = "📌 گزارش آماری داده واقعی؛ سیگنال یا پیش‌بینی نیست."
 _CHANNEL_LINE = f"♾️ {TELEGRAM_CHANNEL_URL}"
 
