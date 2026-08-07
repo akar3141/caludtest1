@@ -1,0 +1,61 @@
+name: Dow Daily Report
+
+on:
+  schedule:
+    # 09:15 America/New_York (15 min before NYSE open), primary + backstop.
+    # See gold-report.yml for the full rationale on the four cron lines.
+    - cron: "15 14 * * 1-5"   # EST primary  (UTC-5): Nov-Mar
+    - cron: "30 14 * * 1-5"   # EST catch-up
+    - cron: "15 13 * * 1-5"   # EDT primary  (UTC-4): Mar-Nov
+    - cron: "30 13 * * 1-5"   # EDT catch-up
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Bypass the time/trading-day gate"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Run the full pipeline without sending to Telegram"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dow-daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore idempotency state
+        uses: actions/cache@v4
+        with:
+          path: data/state.json
+          key: dow-daily-state-${{ github.run_id }}
+          restore-keys: |
+            dow-daily-state-
+
+      - name: Run Dow daily report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          PYTHONPATH: src
+        run: |
+          python -m bot.main --asset dow --mode daily \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
