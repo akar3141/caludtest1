@@ -272,7 +272,11 @@ At the end write exactly:
 
 دریافت گزارشات روزانه و هفتگی قبل از اوپن نیویورک در کانال:
 https://t.me/test5tts
-
+def get_gemini_analyst(api_key: str, model_chain: list[str]):
+    return GeminiAnalyst(
+        api_key=api_key,
+        model_chain=model_chain,
+    )
 """
 
 
