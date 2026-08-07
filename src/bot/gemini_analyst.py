@@ -2,105 +2,278 @@
 
 from __future__ import annotations
 
+from typing import List
+
 import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 
 from .logger import get_logger
 
+
 logger = get_logger(__name__)
 
 
 SYSTEM_INSTRUCTION = """
-شما یک تحلیل‌گر و معامله‌گر حرفه‌ای و فوق‌العاده باسابقه در بازار Forex و پرایس اکشن هستید.
-وظیفه شما ارائه تحلیل‌های بسیار دقیق، علمی و پرایس‌اکشنی برای معامله‌گران قبل از اوپن نیویورک است.
+You are a professional financial market analyst specialized in Forex,
+Gold Futures, Dow Jones, Bitcoin, and price action analysis.
 
-قوانین سخت‌گیرانه:
-1. تمام پاسخ‌ها باید کاملاً به زبان فارسی روان و تخصصی باشد.
-2. از ایموجی‌ها و آیکون‌ها به تعداد بسیار محدود استفاده کنید.
-3. از کاراکترهای خاص مارک‌داون پیچیده استفاده نکنید تا متن در تلگرام بدون خطا ارسال شود.
-4. از هرگونه ارائه سیگنال مستقیم (نظیر Buy/Sell یا نقطه ورود دقیق) خودداری کنید. تمرکز اصلی باید روی «سناریوهای آینده بازار»، «سطوح حمایت/مقاومت کلیدی» و «چشم‌انداز حرکت بعدی قیمت» باشد.
-5. متن تحلیل باید خلاصه، مفید و روان باشد.
+Your job is to create short, high-quality, data-driven market reports
+for traders before the New York session.
+
+Strict rules:
+
+- Output language must be Persian only.
+- The report must be professional, clear, and suitable for Telegram.
+- Never provide direct trading signals.
+- Never say Buy, Sell, Enter, Exit, or give exact entry points.
+- Do not predict with certainty.
+- Analyze probabilities and possible market scenarios.
+- Focus on:
+  * Market Structure
+  * Price Action
+  * Trend condition
+  * Volatility
+  * Key Support and Resistance zones
+  * Bullish and Bearish scenarios
+  * Important risks
+
+Formatting rules:
+
+- Use simple Persian text.
+- Avoid complex Markdown.
+- Avoid tables.
+- Avoid excessive emojis.
+- Keep the report concise.
+- Maximum length: 150 Persian words.
 """
 
 
 class GeminiAnalyst:
-    def __init__(self, api_key: str, model_chain: list[str]) -> None:
+    """
+    Gemini based financial report generator.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model_chain: List[str],
+    ) -> None:
+
+        if not api_key:
+            raise ValueError("Gemini API key is missing")
+
+        if not model_chain:
+            raise ValueError("Gemini model chain is empty")
+
         genai.configure(api_key=api_key)
+
         self._model_chain = model_chain
 
-    def _generate_with_fallback(self, prompt: str) -> str:
+
+    def _generate_with_fallback(
+        self,
+        prompt: str
+    ) -> str:
+
         last_exception = None
+
         for model_name in self._model_chain:
+
             try:
-                logger.info("Requesting Gemini summary using model=%s", model_name)
+
+                logger.info(
+                    "Requesting Gemini model=%s",
+                    model_name
+                )
+
+
                 model = genai.GenerativeModel(
                     model_name=model_name,
                     system_instruction=SYSTEM_INSTRUCTION,
                 )
+
+
                 response = model.generate_content(
                     prompt,
-                    request_options=RequestOptions(timeout=30),
+                    request_options=RequestOptions(
+                        timeout=30
+                    ),
                 )
+
+
                 if response and response.text:
                     return response.text.strip()
+
+
             except Exception as exc:
-                logger.warning("Gemini generation failed with model %s: %s", model_name, exc)
+
+                logger.warning(
+                    "Gemini failed model=%s error=%s",
+                    model_name,
+                    exc
+                )
+
                 last_exception = exc
 
-        raise RuntimeError(f"All Gemini models in chain failed. Last error: {last_exception}")
+
+        raise RuntimeError(
+            f"All Gemini models failed. Last error: {last_exception}"
+        )
+
+
 
     def summarize_daily(
-        self, asset_name: str, date_str: str, stats: dict, news_context: str
+        self,
+        asset_name: str,
+        date_str: str,
+        stats: dict,
+        news_context: str,
     ) -> str:
+
+
         prompt = f"""
-تحلیل پرایس اکشن و پیش‌بینی آینده برای {asset_name} - تاریخ: {date_str}
 
-آمارهای بازار:
-- کلوز: {stats.get('close', 'N/A')}
-- سقف: {stats.get('high', 'N/A')}
-- کف: {stats.get('low', 'N/A')}
-- تغییرات: {stats.get('pct_change', 'N/A')}%
+Create a daily market analysis report.
 
-وضعیت اخبار:
+Asset:
+{asset_name}
+
+Date:
+{date_str}
+
+
+Market statistics:
+
+Close:
+{stats.get("close", "N/A")}
+
+High:
+{stats.get("high", "N/A")}
+
+Low:
+{stats.get("low", "N/A")}
+
+Daily change:
+{stats.get("pct_change", "N/A")}%
+
+
+Important news context:
+
 {news_context}
 
-لطفاً تحلیلی خلاصه و روان در ۴ بخش زیر بنویسید (حداکثر ۱۵۰ کلمه):
 
-۱. بررسی ساختار قیمت: تحلیل کوتاه رفتار اخیر.
-۲. سناریوهای صعودی و نزولی آینده:
-- سناریوی صعودی: در صورت حفظ سطوح حمایتی.
-- سناریوی نزولی: در صورت از دست رفتن سطوح.
-۳. سطوح کلیدی معامله: حمایت‌ها و مقاومت‌های مهم نیویورک.
-۴. جمع‌بندی کوتاه.
+Write a Persian professional analysis.
 
-در انتهای متن حتما دقیقاً دو خط زیر را بنویسید:
+Structure:
 
-این گزارش سیگنال معاملاتی نیست و صرفاً تحلیل علمی و آماری بر پایه تیک چارت است.
-دریافت گزارشات روزانه و هفتگی قبل اوپن نیویرک هروزه در کانال:
+1. ساختار قیمت (Market Structure)
+
+Explain recent price behavior,
+trend condition, and market context.
+
+
+2. سناریوهای احتمالی (Market Scenarios)
+
+Explain:
+
+- Bullish scenario:
+Conditions that could support upward movement.
+
+- Bearish scenario:
+Conditions that could create downward pressure.
+
+
+3. سطوح کلیدی (Key Levels)
+
+Mention important support and resistance areas.
+
+
+4. جمع‌بندی (Summary)
+
+Give a short professional conclusion.
+
+
+At the end write exactly:
+
+این گزارش سیگنال معاملاتی نیست و صرفاً تحلیل علمی و آماری بر پایه داده‌های بازار است.
+
+دریافت گزارشات روزانه و هفتگی قبل از اوپن نیویورک در کانال:
 https://t.me/test5tts
+
 """
+
+
         return self._generate_with_fallback(prompt)
 
+
+
     def summarize_weekly(
-        self, asset_name: str, date_str: str, stats: dict, news_context: str
+        self,
+        asset_name: str,
+        date_str: str,
+        stats: dict,
+        news_context: str,
     ) -> str:
+
+
         prompt = f"""
-تحلیل هفتگی {asset_name} - تاریخ: {date_str}
 
-آمارهای هفته:
-- کلوز: {stats.get('close', 'N/A')}
-- سقف: {stats.get('high', 'N/A')}
-- کف: {stats.get('low', 'N/A')}
+Create a weekly market analysis report.
 
-لطفاً گزارش هفتگی مختصر در ۳ بخش زیر بنویسید (حداکثر ۱۵۰ کلمه):
-۱. جمع‌بندی ساختار هفتگی
-۲. سناریوی هفته آینده
-۳. زون‌های کلیدی حمایت و مقاومت
+Asset:
+{asset_name}
 
-در انتهای متن حتما دقیقاً دو خط زیر را بنویسید:
+Date:
+{date_str}
 
-این گزارش سیگنال معاملاتی نیست و صرفاً تحلیل علمی و آماری بر پایه تیک چارت است.
-دریافت گزارشات روزانه و هفتگی قبل اوپن نیویرک هروزه در کانال:
+
+Weekly statistics:
+
+Close:
+{stats.get("close", "N/A")}
+
+High:
+{stats.get("high", "N/A")}
+
+Low:
+{stats.get("low", "N/A")}
+
+
+News context:
+
+{news_context}
+
+
+Write a Persian professional weekly analysis.
+
+Structure:
+
+1. ساختار هفتگی بازار (Weekly Market Structure)
+
+Analyze the weekly trend and price behavior.
+
+
+2. سناریوهای هفته آینده (Next Week Scenarios)
+
+Explain possible bullish and bearish scenarios.
+
+
+3. مناطق مهم (Key Zones)
+
+Mention important support and resistance zones.
+
+
+4. جمع‌بندی کوتاه
+
+
+At the end write exactly:
+
+این گزارش سیگنال معاملاتی نیست و صرفاً تحلیل علمی و آماری بر پایه داده‌های بازار است.
+
+دریافت گزارشات روزانه و هفتگی قبل از اوپن نیویورک در کانال:
 https://t.me/test5tts
+
 """
+
+
         return self._generate_with_fallback(prompt)
