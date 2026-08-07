@@ -31,9 +31,12 @@ ASSET_DISPLAY_NAMES: dict[AssetName, str] = {
 # Preferred model first, then progressively safer fallbacks. If GEMINI_MODEL
 # is set explicitly, it is tried before this list.
 DEFAULT_GEMINI_MODEL_CHAIN = [
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-3.5-flash-lite",
+    "gemma-4-31b-it",
 ]
 
 
