@@ -3,18 +3,24 @@
 Kept separate from chart_generator/gemini_analyst so that changing the
 message layout never touches chart rendering or AI-generation logic.
 
-The daily report renders a full Persian statistical breakdown built
-entirely from `DailyStats` (no numbers are invented here — everything
-comes from `statistical_analyzer.py`); the only free-text piece is the
-Gemini-written outlook/summary passed in as `ai_summary`, which already
-carries its own deterministic disclaimer + channel-link footer (see
-`gemini_analyst.py`).
+The daily report renders a compact, emoji-led Persian statistical
+breakdown built entirely from `DailyStats` (no numbers are invented
+here — everything comes from `statistical_analyzer.py`); the only
+free-text piece is the Gemini-written wrap-up passed in as `ai_summary`,
+which already ends with its own deterministic disclaimer + Telegram
+channel-link footer (see `gemini_analyst.py`).
+
+The weekly report mirrors the same visual language (header, separators,
+numbered sections, emoji-led lines) but is built entirely from weekly
+concepts — week open/close, weekly range, volatility, average daily
+range, per-day breakdown, strongest/weakest/highest-volume day, weekly
+trend — never daily/session vocabulary, since a week has no sessions.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import jdatetime
@@ -37,11 +43,19 @@ _CAPTION_SAFETY_MARGIN = 80
 
 _PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
-_GREGORIAN_MONTHS_FA = {
-    1: "ژانویه", 2: "فوریه", 3: "مارس", 4: "آوریل", 5: "می",
-    6: "ژوئن", 7: "ژوئیه", 8: "آگوست", 9: "سپتامبر", 10: "اکتبر",
-    11: "نوامبر", 12: "دسامبر",
+# English (not transliterated) Gregorian month abbreviations — deliberately
+# hardcoded rather than using datetime.strftime("%b") so the header format
+# never depends on the host's locale being English.
+_GREGORIAN_MONTHS_EN_ABBR = {
+    1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+    7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
 }
+
+# Numbered-section keycap headers used by both report types.
+_SEC1, _SEC2, _SEC3, _SEC4, _SEC5 = "۱️⃣", "۲️⃣", "۳️⃣", "۴️⃣", "۵️⃣"
+
+SEP = "━━━━━━━━━━"
+_TZ_LINE = "🕐 سرور GMT+3 | ایران GMT+3:30"
 
 # Emoji + Persian display name + fixed server/Tehran window labels for each
 # session. Window strings are precomputed (not derived via generic datetime
@@ -55,7 +69,7 @@ _SESSION_DISPLAY: dict[str, dict[str, str]] = {
     },
 }
 _OVERLAP_DISPLAY = {
-    "emoji": "🟣", "fa_name": "همپوشانی لندن-نیویورک",
+    "emoji": "🟣", "fa_name": "همپوشانی لندن–نیویورک",
     "server": "15:00–19:00", "tehran": "15:30–19:30",
 }
 
@@ -68,33 +82,29 @@ def _fa_digits(s: str) -> str:
     return s.translate(_PERSIAN_DIGITS)
 
 
-def _dual_time(dt: datetime) -> str:
-    """'سرور HH:MM (ایران HH:MM)' — server is fixed UTC+3, Tehran UTC+3:30."""
-    server_str = dt.astimezone(SERVER_TZ).strftime("%H:%M")
-    tehran_str = dt.astimezone(TEHRAN_TZ).strftime("%H:%M")
-    return f"سرور {server_str} (ایران {tehran_str})"
-
-
-def _dual_hour_range(hour_start_utc: datetime) -> str:
-    """Same as `_dual_time` but for a full clock-hour window, e.g. used for
-    busiest/quietest hour where the hour boundary itself is the fact."""
-    hour_end_utc = hour_start_utc + timedelta(hours=1)
-    server_start = hour_start_utc.astimezone(SERVER_TZ).strftime("%H:%M")
-    server_end = hour_end_utc.astimezone(SERVER_TZ).strftime("%H:%M")
-    tehran_start = hour_start_utc.astimezone(TEHRAN_TZ).strftime("%H:%M")
-    tehran_end = hour_end_utc.astimezone(TEHRAN_TZ).strftime("%H:%M")
-    return f"سرور {server_start}–{server_end} (ایران {tehran_start}–{tehran_end})"
+def _server_hm(ts) -> str:
+    return ts.astimezone(SERVER_TZ).strftime("%H:%M")
 
 
 def _header_dates(report_time: datetime) -> tuple[str, str]:
     """Returns (persian_jalali_date, gregorian_date) strings, both in
-    Asia/Tehran local date, matching the report header format."""
+    Asia/Tehran local date — e.g. ("۱۴ مرداد ۱۴۰۵", "5 Aug 2026")."""
     tehran_dt = report_time.astimezone(TEHRAN_TZ)
     jdatetime.set_locale(jdatetime.FA_LOCALE)
     jd = jdatetime.date.fromgregorian(date=tehran_dt.date())
-    persian = _fa_digits(jd.strftime("%A %d %B %Y"))
-    gregorian = f"{tehran_dt.day} {_GREGORIAN_MONTHS_FA[tehran_dt.month]} {tehran_dt.year}"
+    persian = f"{_fa_digits(str(jd.day))} {jd.strftime('%B')} {_fa_digits(str(jd.year))}"
+    gregorian = f"{tehran_dt.day} {_GREGORIAN_MONTHS_EN_ABBR[tehran_dt.month]} {tehran_dt.year}"
     return persian, gregorian
+
+
+def _parse_tehran_time_str(tehran_time_str: str) -> datetime:
+    """Parses the fixed 'YYYY-MM-DD HH:MM (Asia/Tehran)' string produced by
+    TimeManager.format_tehran() back into a tz-aware Asia/Tehran datetime,
+    so the weekly header can be built from the same date logic as the
+    daily header without needing a raw datetime object passed in."""
+    naive_part = tehran_time_str.split(" (")[0]
+    naive_dt = datetime.strptime(naive_part, "%Y-%m-%d %H:%M")
+    return naive_dt.replace(tzinfo=TEHRAN_TZ)
 
 
 def format_short_caption(asset_display_name: str, tehran_time_str: str, note: str) -> str:
@@ -117,193 +127,122 @@ def format_daily_caption(
     news_events: "list[NewsEvent] | None" = None,
 ) -> str:
     L = escape_mdv2  # noqa: N806 — short alias, used on nearly every line below
-    SEP = "━━━━━━━━━━━━━━━━━━━━"
     persian_date, gregorian_date = _header_dates(report_time)
 
     lines: list[str] = [
-        L(f"📊 گزارش آماری جامع {asset_display_name} | {persian_date} ({gregorian_date})"),
-        L("🕐 ساعت سرور بروکر: GMT+3 | ساعت ایران: UTC+3:30 (۳۰ دقیقه جلوتر از سرور)"),
-        SEP,
-        f"*{L('۱) خلاصه‌ی کلی روز')}*",
-        SEP,
+        L(f"📊 {asset_display_name} | {persian_date} | {gregorian_date}"),
+        L(_TZ_LINE),
+        SEP, L(f"{_SEC1} خلاصه روز"), SEP,
     ]
 
     day_change = stats.close - stats.open
-    direction_fa = "صعودی" if day_change >= 0 else "نزولی"
-    lines.append(
-        L(
-            f"باز شدن: {stats.open:.2f} → بسته شدن: {stats.close:.2f} → "
-            f"روز {direction_fa}، {day_change:+.2f} دلار"
-        )
-    )
-    if stats.total_range is not None:
-        lines.append(L(f"دامنه‌ی نوسان کل روز: {stats.total_range:.2f} دلار"))
+    lines.append(L(f"🔓 باز: {stats.open:.2f} → 🔒 بسته: {stats.close:.2f}"))
+    range_part = f" | دامنه: {stats.total_range:.2f}$" if stats.total_range is not None else ""
+    lines.append(L(f"📈 تغییر: {day_change:+.2f}${range_part}"))
     if stats.avg_candle_range is not None:
-        lines.append(L(f"میانگین دامنه‌ی هر کندل ۱ دقیقه‌ای: {stats.avg_candle_range:.2f} دلار"))
+        lines.append(L(f"📊 میانگین کندل 1m: {stats.avg_candle_range:.2f}$"))
     if stats.up_candles is not None and stats.total_candles:
         lines.append(
-            L(f"کندل صعودی: {stats.up_candles} از {stats.total_candles} ({stats.up_pct:.2f}٪)")
+            L(
+                f"🟢 صعودی: {stats.up_candles} ({stats.up_pct:.2f}٪) | "
+                f"🔴 نزولی: {stats.down_candles} ({stats.down_pct:.2f}٪)"
+            )
         )
-        lines.append(
-            L(f"کندل نزولی: {stats.down_candles} از {stats.total_candles} ({stats.down_pct:.2f}٪)")
-        )
-    lines.append(L(f"♦️حجم تیک کل روز: {stats.volume:,.0f}"))
+    lines.append(L(f"♦️ حجم کل: {stats.volume:,.0f}"))
 
     # --- Section 2: session breakdown ---
-    lines += [SEP, f"*{L('۲) عملکرد سشن‌ها')}*", SEP, ""]
-
-    session_ranges = {
-        s.name: (s.high - s.low) for s in stats.sessions if s.high is not None and s.low is not None
-    }
-    max_range_session = max(session_ranges, key=lambda k: session_ranges[k]) if session_ranges else None
-    session_net_moves = {s.name: s.net_move for s in stats.sessions if s.net_move is not None}
-    max_move_session = (
-        max(session_net_moves, key=lambda k: abs(session_net_moves[k])) if session_net_moves else None
-    )
-    session_5m_vols = {
-        s.name: s.highest_5m_volume.volume
-        for s in stats.sessions
-        if s.highest_5m_volume is not None
-    }
-    max_5m_session = max(session_5m_vols, key=lambda k: session_5m_vols[k]) if session_5m_vols else None
+    lines += [SEP, L(f"{_SEC2} عملکرد سشن‌ها"), SEP]
 
     for s in stats.sessions:
-        disp = _SESSION_DISPLAY.get(s.name, {"emoji": "⚪", "fa_name": s.name})
-        lines.append(
-            L(
-                f"{disp['emoji']} {disp['fa_name']} | سرور {disp.get('server', '?')} "
-                f"→ ایران {disp.get('tehran', '?')}"
-            )
-        )
+        disp = _SESSION_DISPLAY.get(s.name, {"emoji": "⚪", "fa_name": s.name, "server": "?", "tehran": "?"})
+        lines.append(L(f"{disp['emoji']} {disp['fa_name']} | {disp['server']}"))
+        lines.append(L(f"🇮🇷 ایران: {disp['tehran']}"))
+
         if s.high is None or s.low is None:
             lines.append(L("داده‌ای موجود نیست"))
-            lines.append("")
             continue
 
-        rng = s.high - s.low
-        rng_note = " (پرنوسان‌ترین سشن روز)" if s.name == max_range_session else ""
-        lines.append(L(f"دامنه نوسان: {rng:.2f}${rng_note}"))
-
+        lines.append(L(f"↕️ دامنه: {s.high - s.low:.2f}$"))
         if s.net_move is not None:
-            move_note = " (قوی‌ترین حرکت جهت‌دار روز)" if s.name == max_move_session else ""
-            lines.append(L(f"حرکت خالص: {s.net_move:+.2f}${move_note}"))
-
+            lines.append(L(f"📈 حرکت خالص: {s.net_move:+.2f}$"))
         if s.up_candles is not None and s.down_candles is not None:
-            total = s.up_candles + s.down_candles
-            up_pct = (s.up_candles / total * 100) if total else 0.0
-            lines.append(L(f"کندل صعودی/نزولی: {s.up_candles} / {s.down_candles} ({up_pct:.2f}٪ صعودی)"))
-
+            lines.append(L(f"🟢/🔴 کندل: {s.up_candles} / {s.down_candles}"))
+            lines.append(L(f"📊 درصد صعودی: {s.up_pct:.2f}٪"))
         if s.biggest_up_candle is not None:
-            lines.append(L(f"بزرگ‌ترین کندل صعودی ۱دقیقه‌ای: {s.biggest_up_candle.value:+.2f}$"))
+            lines.append(L(f"⬆️ بزرگ‌ترین صعود 1m: {s.biggest_up_candle.value:+.2f}$"))
         if s.biggest_down_candle is not None:
-            lines.append(L(f"بزرگ‌ترین کندل نزولی ۱دقیقه‌ای: {s.biggest_down_candle.value:.2f}$"))
-
-        vol_note = " (بیشترین حجم روز)" if s.name == stats.highest_volume_session_name else ""
-        lines.append(L(f"🔸حجم: {s.volume:,.0f}{vol_note}"))
-
+            lines.append(L(f"⬇️ بزرگ‌ترین نزول 1m: {s.biggest_down_candle.value:.2f}$"))
+        if s.volume is not None:
+            lines.append(L(f"♦️ حجم: {s.volume:,.0f}"))
         if s.highest_5m_volume is not None:
-            fivem_note = " (بیشترین 5m روز)" if s.name == max_5m_session else ""
-            lines.append(
-                L(
-                    f"🔹بزرگترین حجم کندل 5m: در {_dual_time(s.highest_5m_volume.start_time_utc)} "
-                    f"= {s.highest_5m_volume.volume:,.0f}{fivem_note}"
-                )
-            )
-        lines.append("")
+            t = _server_hm(s.highest_5m_volume.start_time_utc)
+            lines.append(L(f"5m: {t} → {s.highest_5m_volume.volume:,.0f}"))
 
     if stats.overlap is not None:
+        o = stats.overlap
         d = _OVERLAP_DISPLAY
-        lines.append(L(f"{d['emoji']} {d['fa_name']} | سرور {d['server']} → ایران {d['tehran']}"))
-        lines.append(L(f"دامنه نوسان: {stats.overlap.range:.2f}$ در فقط ۴ ساعت"))
-        pct = stats.overlap.pct_above_daily_avg
-        pct_note = "بیشتر" if pct >= 0 else "کمتر"
-        lines.append(
-            L(
-                f"میانگین دامنه‌ی هر کندل در این بازه: {stats.overlap.avg_candle_range:.2f}$ "
-                f"(حدود {abs(pct):.0f}٪ {pct_note} از میانگین کل روز)"
-            )
-        )
-        if pct >= 0:
-            lines.append(L("فشرده‌ترین بازه‌ی نوسان روز از نظر تراکم در دقیقه"))
-        lines.append("")
+        lines.append(L(f"{d['emoji']} {d['fa_name']} | {d['server']}"))
+        lines.append(L(f"🇮🇷 ایران: {d['tehran']}"))
+        lines.append(L(f"↕️ دامنه: {o.range:.2f}$"))
+        lines.append(L(f"📊 میانگین کندل: {o.avg_candle_range:.2f}$/1m"))
+        pct_word = "بیشتر" if o.pct_above_daily_avg >= 0 else "کمتر"
+        lines.append(L(f"⚡ حدود {abs(o.pct_above_daily_avg):.0f}٪ {pct_word} از میانگین کل روز"))
 
     # --- Section 3: key points ---
-    lines += [SEP, f"*{L('۳) نقاط کلیدی روز')}*", SEP]
+    lines += [SEP, L(f"{_SEC3} نقاط کلیدی"), SEP]
 
     if stats.biggest_range_candle is not None:
-        lines.append(
-            L(
-                f"بزرگ‌ترین دامنه‌ی یک کندل: {_dual_time(stats.biggest_range_candle.time_utc)} "
-                f"- مقدار {stats.biggest_range_candle.value:.2f}$"
-            )
-        )
+        t = _server_hm(stats.biggest_range_candle.time_utc)
+        lines.append(L(f"📏 بیشترین دامنه: {t} → {stats.biggest_range_candle.value:.2f}$"))
     if stats.second_biggest_range_candle is not None:
-        lines.append(
-            L(
-                f"دومین دامنه‌ی بزرگ: {_dual_time(stats.second_biggest_range_candle.time_utc)} "
-                f"- مقدار {stats.second_biggest_range_candle.value:.2f}$"
-            )
-        )
+        t = _server_hm(stats.second_biggest_range_candle.time_utc)
+        lines.append(L(f"📏 دومین: {t} → {stats.second_biggest_range_candle.value:.2f}$"))
     if stats.highest_volume_1m is not None:
-        lines.append(
-            L(
-                f"بیشترین حجم یک دقیقه: {_dual_time(stats.highest_volume_1m.time_utc)} - "
-                f"{stats.highest_volume_1m.value:,.0f} تیک"
-            )
-        )
+        t = _server_hm(stats.highest_volume_1m.time_utc)
+        lines.append(L(f"♦️ بیشترین حجم 1m: {t} → {stats.highest_volume_1m.value:,.0f}"))
     if stats.biggest_up_candle is not None:
-        lines.append(
-            L(
-                f"بزرگ‌ترین کندل صعودی: {_dual_time(stats.biggest_up_candle.time_utc)} - "
-                f"{stats.biggest_up_candle.value:+.2f}$"
-            )
-        )
+        t = _server_hm(stats.biggest_up_candle.time_utc)
+        lines.append(L(f"⬆️ بزرگ‌ترین صعود: {t} → {stats.biggest_up_candle.value:+.2f}$"))
     if stats.biggest_down_candle is not None:
-        lines.append(
-            L(
-                f"بزرگ‌ترین کندل نزولی: {_dual_time(stats.biggest_down_candle.time_utc)} - "
-                f"{stats.biggest_down_candle.value:.2f}$"
-            )
-        )
+        t = _server_hm(stats.biggest_down_candle.time_utc)
+        lines.append(L(f"⬇️ بزرگ‌ترین نزول: {t} → {stats.biggest_down_candle.value:.2f}$"))
     if stats.busiest_hour is not None:
+        h = stats.busiest_hour.hour_start_utc.astimezone(SERVER_TZ).hour
         lines.append(
-            L(
-                f"پرنوسان‌ترین ساعت روز: {_dual_hour_range(stats.busiest_hour.hour_start_utc)} - "
-                f"{stats.busiest_hour.range:.2f}$"
-            )
+            L(f"🔥 پرنوسان‌ترین ساعت: {h:02d}–{(h + 1) % 24:02d} → {stats.busiest_hour.range:.2f}$")
         )
     if stats.quietest_hour is not None:
+        h = stats.quietest_hour.hour_start_utc.astimezone(SERVER_TZ).hour
         lines.append(
-            L(
-                f"کم‌نوسان‌ترین ساعت روز: {_dual_hour_range(stats.quietest_hour.hour_start_utc)} - "
-                f"{stats.quietest_hour.range:.2f}$"
-            )
+            L(f"😴 کم‌نوسان‌ترین: {h:02d}–{(h + 1) % 24:02d} → {stats.quietest_hour.range:.2f}$")
         )
 
     # --- Section 4: intraday drawdown / runup ---
-    lines += [SEP, f"*{L('۴) بیشینه‌ی افت و رشد درون‌روزی')}*", SEP]
+    lines += [SEP, L(f"{_SEC4} افت / رشد"), SEP]
 
     if stats.max_drawdown is not None:
         dd = stats.max_drawdown
-        lines.append(L(f"بزرگ‌ترین اصلاح (Max Drawdown): {dd.value:.2f} دلار"))
-        lines.append(L(f"از {_dual_time(dd.start_time_utc)} تا {_dual_time(dd.end_time_utc)}"))
+        lines.append(
+            L(f"🔻 Max DD: {dd.value:.2f}$ | {_server_hm(dd.start_time_utc)}–{_server_hm(dd.end_time_utc)}")
+        )
     if stats.max_runup is not None:
         ru = stats.max_runup
-        lines.append(L(f"بزرگ‌ترین رشد پیوسته (Max Runup): {ru.value:.2f} دلار"))
-        lines.append(L(f"از {_dual_time(ru.start_time_utc)} تا {_dual_time(ru.end_time_utc)}"))
+        lines.append(
+            L(f"🔺 Max Runup: {ru.value:.2f}$ | {_server_hm(ru.start_time_utc)}–{_server_hm(ru.end_time_utc)}")
+        )
 
     # Editorial-only section: present only on days with confirmed high-impact
     # USD news. Its absence never affects whether the report itself is sent.
     if news_events:
-        lines += [SEP, f"*{L('اخبار مهم دلاری امروز')}*", SEP]
+        lines += [SEP, L("📰 اخبار مهم دلاری امروز"), SEP]
         for e in news_events[:5]:
-            when_str = e.when.strftime("%H:%M UTC")
+            when_str = _server_hm(e.when)
             lines.append(L(f"• {when_str} — {e.title}"))
 
-    # --- Section 5: AI-written wrap-up + outlook. `ai_summary` already
-    # ends with the deterministic disclaimer + Telegram channel footer
-    # appended in gemini_analyst.py — never generated by the model itself.
-    lines += [SEP, f"*{L('۵) جمع‌بندی')}*", SEP, L(ai_summary)]
+    # --- Section 5: AI-written wrap-up. `ai_summary` already ends with the
+    # deterministic disclaimer + Telegram channel footer appended in
+    # gemini_analyst.py — never generated by the model itself.
+    lines += [SEP, L(f"{_SEC5} جمع‌بندی"), SEP, L(ai_summary)]
 
     return "\n".join(lines)
 
@@ -341,33 +280,72 @@ def format_weekly_caption(
     news_events: "list[NewsEvent]",
     ai_summary: str,
 ) -> str:
-    lines = [
-        f"*{escape_mdv2(asset_display_name)} — Weekly Report*",
-        f"🕒 {escape_mdv2(tehran_time_str)}",
-        "",
-        "*Weekly OHLC*",
-        f"O: {escape_mdv2(f'{stats.week_open:.2f}')}  H: {escape_mdv2(f'{stats.week_high:.2f}')}  "
-        f"L: {escape_mdv2(f'{stats.week_low:.2f}')}  C: {escape_mdv2(f'{stats.week_close:.2f}')}",
-        f"Range: {escape_mdv2(f'{stats.weekly_range:.2f}')}  "
-        f"Volatility: {escape_mdv2(f'{stats.volatility_pct:.4f}')}%",
-        f"Avg Daily Range: {escape_mdv2(f'{stats.average_daily_range:.2f}')}",
-        "",
-        f"💪 Strongest day: {escape_mdv2(stats.strongest_day.date)}",
-        f"📉 Weakest day: {escape_mdv2(stats.weakest_day.date)}",
-        f"📊 Highest volume day: {escape_mdv2(stats.highest_volume_day.date)}",
-        f"⏱ Most active hour \\(UTC\\): {escape_mdv2(f'{stats.most_active_hour_utc}:00')}",
-        "",
-        f"*Trend*: {escape_mdv2(stats.trend_summary)}",
+    L = escape_mdv2  # noqa: N806
+    tehran_dt = _parse_tehran_time_str(tehran_time_str)
+    persian_date, gregorian_date = _header_dates(tehran_dt)
+
+    change = stats.week_close - stats.week_open
+
+    lines: list[str] = [
+        L(f"📊 {asset_display_name} | گزارش هفتگی | {persian_date} | {gregorian_date}"),
+        L(_TZ_LINE),
+        SEP, L(f"{_SEC1} خلاصه هفته"), SEP,
     ]
+    lines.append(L(f"🔓 باز: {stats.week_open:.2f} → 🔒 بسته: {stats.week_close:.2f}"))
+    lines.append(L(f"📈 تغییر: {change:+.2f}$ | دامنه هفتگی: {stats.weekly_range:.2f}$"))
+    lines.append(L(f"📊 میانگین دامنه‌ی روزانه: {stats.average_daily_range:.2f}$"))
+    lines.append(L(f"⚡ نوسان‌پذیری: {stats.volatility_pct:.4f}٪"))
+    lines.append(L(f"🔝 بیشینه هفته: {stats.week_high:.2f}$ | 🔻 کمینه هفته: {stats.week_low:.2f}$"))
 
-    lines.append("")
-    if news_events:
-        lines.append("*Important USD News This Week*")
-        for e in news_events[:8]:
-            when_str = e.when.strftime("%a %H:%M UTC")
-            lines.append(f"• {escape_mdv2(when_str)} — {escape_mdv2(e.title)}")
+    # --- Section 2: day-by-day breakdown (the weekly analogue of session
+    # breakdown — a week has no trading sessions, so this walks each
+    # trading day of the week instead). ---
+    lines += [SEP, L(f"{_SEC2} عملکرد روزهای هفته"), SEP]
+
+    max_range_day = max(stats.daily_breakdown, key=lambda d: d.range) if stats.daily_breakdown else None
+    for d in stats.daily_breakdown:
+        d_change = d.close - d.open
+        lines.append(L(f"📅 {d.date} | باز {d.open:.2f} → بسته {d.close:.2f}"))
+        range_note = (
+            " (پرنوسان‌ترین روز هفته)" if max_range_day is not None and d.date == max_range_day.date else ""
+        )
+        lines.append(L(f"↕️ دامنه: {d.range:.2f}${range_note}"))
+        lines.append(L(f"📈 حرکت خالص: {d_change:+.2f}$"))
+        vol_note = " (پرحجم‌ترین روز هفته)" if d.date == stats.highest_volume_day.date else ""
+        lines.append(L(f"♦️ حجم: {d.volume:,.0f}{vol_note}"))
+
+    # --- Section 3: key weekly points ---
+    lines += [SEP, L(f"{_SEC3} نقاط کلیدی هفته"), SEP]
+
+    strongest_change = stats.strongest_day.close - stats.strongest_day.open
+    weakest_change = stats.weakest_day.close - stats.weakest_day.open
+    lines.append(L(f"🏆 قوی‌ترین روز: {stats.strongest_day.date} → {strongest_change:+.2f}$"))
+    lines.append(L(f"🥶 ضعیف‌ترین روز: {stats.weakest_day.date} → {weakest_change:+.2f}$"))
+    lines.append(
+        L(f"♦️ پرحجم‌ترین روز: {stats.highest_volume_day.date} → {stats.highest_volume_day.volume:,.0f}")
+    )
+    lines.append(L(f"🔥 پرفعالیت‌ترین ساعت (UTC): {stats.most_active_hour_utc:02d}:00"))
+
+    # --- Section 4: weekly trend ---
+    lines += [SEP, L(f"{_SEC4} روند هفته"), SEP]
+
+    net_change_pct = (change / stats.week_open * 100) if stats.week_open else 0.0
+    if net_change_pct > 0.15:
+        direction_fa = "صعودی"
+    elif net_change_pct < -0.15:
+        direction_fa = "نزولی"
     else:
-        lines.append("*Important USD News This Week*: none")
+        direction_fa = "خنثی / رنج"
+    lines.append(L(f"📊 تغییر هفتگی: {net_change_pct:+.2f}٪ | جهت کلی: {direction_fa}"))
 
-    lines += ["", "*AI Summary*", escape_mdv2(ai_summary)]
+    if news_events:
+        lines += [SEP, L("📰 اخبار مهم دلاری این هفته"), SEP]
+        for e in news_events[:8]:
+            when_str = e.when.astimezone(SERVER_TZ).strftime("%a %H:%M")
+            lines.append(L(f"• {when_str} — {e.title}"))
+
+    # --- Section 5: AI-written wrap-up (weekly-specific prompt/footer —
+    # see gemini_analyst.py). ---
+    lines += [SEP, L(f"{_SEC5} جمع‌بندی"), SEP, L(ai_summary)]
+
     return "\n".join(lines)
