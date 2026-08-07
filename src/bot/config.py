@@ -1,9 +1,4 @@
-"""Application configuration loaded from environment variables (.env).
-
-Single source of truth for all tunables. Uses pydantic-settings so that
-missing/invalid required variables fail fast at startup with a clear
-error, instead of surfacing as a cryptic AttributeError deep in a job.
-"""
+"""Application configuration loaded from environment variables (.env)."""
 
 from __future__ import annotations
 
@@ -15,7 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 AssetName = Literal["gold", "dow", "bitcoin"]
 ReportMode = Literal["daily", "weekly"]
 
-# yfinance ticker symbols for each supported asset.
 ASSET_SYMBOLS: dict[AssetName, str] = {
     "gold": "GC=F",
     "dow": "^DJI",
@@ -28,8 +22,6 @@ ASSET_DISPLAY_NAMES: dict[AssetName, str] = {
     "bitcoin": "Bitcoin (BTC-USD)",
 }
 
-# Preferred model first, then progressively safer fallbacks. If GEMINI_MODEL
-# is set explicitly, it is tried before this list.
 DEFAULT_GEMINI_MODEL_CHAIN = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
@@ -43,31 +35,22 @@ DEFAULT_GEMINI_MODEL_CHAIN = [
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # --- Telegram ---
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(..., alias="TELEGRAM_CHAT_ID")
 
-    # --- Gemini ---
     gemini_api_key: str = Field(..., alias="GEMINI_API_KEY")
     gemini_model: str | None = Field(default=None, alias="GEMINI_MODEL")
 
-    # --- News filter ---
     news_calendar_url: str = Field(
         default="https://nodedata.forexfactory.com/forex-calendar/weekly.json",
         alias="NEWS_CALENDAR_URL",
     )
 
-    # --- Scheduling tolerance ---
     schedule_tolerance_minutes: int = Field(default=7, alias="SCHEDULE_TOLERANCE_MINUTES")
     catch_up_minutes: int = Field(default=20, alias="CATCH_UP_MINUTES")
 
-    # --- Market data ---
     yfinance_interval: str = Field(default="1m", alias="YFINANCE_INTERVAL")
-
-    # --- Logging ---
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-
-    # --- State store ---
     state_file_path: str = Field(default="data/state.json", alias="STATE_FILE_PATH")
 
     @field_validator("telegram_bot_token", "gemini_api_key")
@@ -85,7 +68,6 @@ class Settings(BaseSettings):
         return v
 
     def gemini_model_chain(self) -> list[str]:
-        """Returns the ordered list of model names to try."""
         chain = ([self.gemini_model] if self.gemini_model else []) + DEFAULT_GEMINI_MODEL_CHAIN
         seen: set[str] = set()
         ordered: list[str] = []
@@ -97,7 +79,6 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
-    """Loads and validates settings, raising ConfigError with a clear message on failure."""
     from pydantic import ValidationError
 
     from .exceptions import ConfigError
