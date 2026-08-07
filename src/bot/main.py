@@ -1,4 +1,16 @@
-"""CLI entrypoint for Market Report Bot."""
+"""CLI entrypoint.
+
+Invoked by each GitHub Actions workflow as:
+
+    python -m bot.main --asset gold --mode daily
+
+Each (asset, mode) pair is its own workflow/cron trigger (per project
+spec), but the *actual* decision of whether to run is still made inside
+`jobs.is_job_due()` using DST-aware zoneinfo math — the cron schedule
+only gets the process running near the right time; the code confirms
+it's really due before doing any paid/rate-limited work (news, market
+data, Gemini, Telegram).
+"""
 
 from __future__ import annotations
 
@@ -6,9 +18,9 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Literal
+from typing import get_args
 
-from .config import load_settings
+from .config import AssetName, ReportMode, load_settings
 from .exceptions import MarketReportError
 from .gemini_analyst import get_gemini_analyst
 from .jobs import is_job_due, run_daily_job, run_weekly_job
@@ -20,25 +32,26 @@ from .state_store import get_state_store
 from .telegram_sender import get_telegram_sender
 from .time_manager import get_time_manager
 
-AssetName = Literal["gold", "dow", "bitcoin"]
-ReportMode = Literal["daily", "weekly"]
-
 logger = get_logger(__name__)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Market Report Bot")
-    parser.add_argument("--asset", required=True, choices=["gold", "dow", "bitcoin"])
-    parser.add_argument("--mode", required=True, choices=["daily", "weekly"])
+    parser.add_argument("--asset", required=True, choices=get_args(AssetName))
+    parser.add_argument("--mode", required=True, choices=get_args(ReportMode))
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Bypass time gates.",
+        help="Bypass the time/tolerance and trading-day gate. News is never a "
+        "gate (it only affects report content) so this has no interaction "
+        "with it. Useful for manual workflow_dispatch runs.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Skip Telegram send.",
+        help="Run the full pipeline (data, analytics, Gemini, chart) but skip the "
+        "Telegram send and the state-store write. Useful for local/manual testing "
+        "without spamming the channel or consuming an idempotency slot.",
     )
     return parser.parse_args(argv)
 
@@ -89,6 +102,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return asyncio.run(_async_main(args.asset, args.mode, args.force, args.dry_run))
     except Exception:  # noqa: BLE001
+        # Last-resort safety net: any truly unexpected exception (e.g. a bug
+        # in a third-party SDK we didn't anticipate) still gets logged
+        # through our structured logger — with the run_id already set by
+        # _async_main where possible — instead of dumping a bare Python
+        # traceback into CI logs with no context. GitHub Actions still
+        # marks the job as failed either way (exit code 1).
         logger.exception("Unhandled exception in main().")
         return 1
 
