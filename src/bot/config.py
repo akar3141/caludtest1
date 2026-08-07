@@ -58,17 +58,7 @@ class Settings(BaseSettings):
     )
 
     # --- Scheduling tolerance ---
-    # Minutes *before* the ideal target time that still count as "due".
-    # Kept narrow so an early/spurious trigger (e.g. manual dispatch spam)
-    # doesn't fire prematurely.
     schedule_tolerance_minutes: int = Field(default=7, alias="SCHEDULE_TOLERANCE_MINUTES")
-
-    # Minutes *after* the ideal target time that still count as "due".
-    # GitHub Actions scheduled workflows can be delayed by GitHub itself
-    # (documented, especially under platform load); each workflow also
-    # schedules a later "catch-up" cron trigger so a delayed primary run
-    # still gets a second chance within this window. state_store prevents
-    # a duplicate send if the primary run already succeeded.
     catch_up_minutes: int = Field(default=20, alias="CATCH_UP_MINUTES")
 
     # --- Market data ---
@@ -95,11 +85,7 @@ class Settings(BaseSettings):
         return v
 
     def gemini_model_chain(self) -> list[str]:
-        """Returns the ordered list of model names to try.
-
-        If GEMINI_MODEL is explicitly set, it takes priority, followed by
-        the built-in fallback chain (deduplicated, order preserved).
-        """
+        """Returns the ordered list of model names to try."""
         chain = ([self.gemini_model] if self.gemini_model else []) + DEFAULT_GEMINI_MODEL_CHAIN
         seen: set[str] = set()
         ordered: list[str] = []
@@ -117,6 +103,6 @@ def load_settings() -> Settings:
     from .exceptions import ConfigError
 
     try:
-        return Settings()  # type: ignore[call-arg]
+        return Settings()
     except ValidationError as exc:
         raise ConfigError(f"Invalid or missing configuration: {exc}") from exc
