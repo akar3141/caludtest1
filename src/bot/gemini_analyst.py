@@ -1,7 +1,7 @@
 """AI-generated narrative summaries via Gemini (google-genai SDK).
 
 Reads the model name from the GEMINI_MODEL environment variable
-(preferring "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro" when available). Since preview
+(preferring "gemini-3.1-pro-preview" when available). Since preview
 models can be pulled or renamed without notice, this module tries a
 configurable fallback chain rather than failing the whole report if the
 preferred model is temporarily unavailable.
