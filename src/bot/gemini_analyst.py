@@ -50,9 +50,10 @@ Daily OHLCV:
 
 News context: {news_context}
 
-Write a 3-4 sentence professional summary in English covering price action,
+Write a 3-4 sentence professional summary in Persian (Farsi) covering price action,
 which session drove the move, and the overall tone for the day. No
-disclaimers, no headers, plain prose only.
+disclaimers, no headers, plain prose only. Use professional financial
+Persian terminology (do not transliterate — use proper Farsi words).
 """
 
 WEEKLY_PROMPT_TEMPLATE = """You are a professional market analyst writing a concise weekly report.
@@ -76,9 +77,10 @@ Weekly statistics:
 
 Important USD news this week: {news_context}
 
-Write a 5-6 sentence professional weekly briefing in English summarizing
+Write a 5-6 sentence professional weekly briefing in Persian (Farsi) summarizing
 the price action, volatility, the trend, and what to watch next week. No
-disclaimers, no headers, plain prose only.
+disclaimers, no headers, plain prose only. Use professional financial
+Persian terminology (do not transliterate — use proper Farsi words).
 """
 
 
