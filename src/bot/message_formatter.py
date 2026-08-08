@@ -168,10 +168,10 @@ def format_daily_caption(
 
     if stats.busiest_hour is not None:
         h = stats.busiest_hour.hour_start_utc.astimezone(SERVER_TZ).hour
-        lines.append(L(f"🔥 پرنوسان‌ترین: {h:02d}–{(h + 1) % 24:02d} → {stats.busiest_hour.range:.2f}$"))
+        lines.append(L(f"🔥 پرنوسان‌ترین: {h:02d}:{(h + 1) % 24:02d} → {stats.busiest_hour.range:.2f}$"))
     if stats.quietest_hour is not None:
         h = stats.quietest_hour.hour_start_utc.astimezone(SERVER_TZ).hour
-        lines.append(L(f"😴 کم‌نوسان‌ترین: {h:02d}–{(h + 1) % 24:02d} → {stats.quietest_hour.range:.2f}$"))
+        lines.append(L(f"😴 کم‌نوسان‌ترین: {h:02d}:{(h + 1) % 24:02d} → {stats.quietest_hour.range:.2f}$"))
     if stats.biggest_up_candle is not None:
         t = _server_hm(stats.biggest_up_candle.time_utc)
         lines.append(L(f"⬆️ بزرگ‌ترین حرکت: {t} → {stats.biggest_up_candle.value:+.2f}$"))
