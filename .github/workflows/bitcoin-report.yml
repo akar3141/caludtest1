@@ -1,0 +1,59 @@
+name: Bitcoin Daily Report
+
+on:
+  schedule:
+    # 21:00 Asia/Tehran = 17:30 UTC (fixed offset, no DST since 2022),
+    # primary + a +15min catch-up backstop against GitHub Actions delay.
+    - cron: "30 17 * * *"
+    - cron: "45 17 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Bypass the time gate"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Run the full pipeline without sending to Telegram"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bitcoin-daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt
+
+      - name: Restore idempotency state
+        uses: actions/cache@v4
+        with:
+          path: data/state.json
+          key: bitcoin-daily-state-${{ github.event_name }}-${{ github.run_id }}
+          restore-keys: |
+            bitcoin-daily-state-${{ github.event_name }}-
+
+      - name: Run Bitcoin daily report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          PYTHONPATH: src
+        run: |
+          python -m bot.main --asset bitcoin --mode daily \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

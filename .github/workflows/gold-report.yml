@@ -1,0 +1,80 @@
+name: Gold Daily Report
+
+on:
+  schedule:
+    # 09:00 America/New_York (30 min before NYSE open), primary + a
+    # +15min catch-up backstop, expressed in UTC. Two DST variants each
+    # (EST/EDT); time_manager.is_due()'s asymmetric window rejects
+    # whichever pair is NOT DST-correct on a given day. The catch-up line
+    # exists because GitHub Actions scheduled workflows are best-effort
+    # and can be delayed (documented GitHub behavior) — if the primary
+    # trigger is late enough to miss its own window, the catch-up trigger
+    # 15 minutes later still falls inside is_due()'s +20min tolerance.
+    # state_store (persisted via actions/cache below) stops the catch-up
+    # from re-sending if the primary already succeeded.
+    - cron: "0 14 * * 1-5"    # EST primary  (UTC-5): Nov-Mar
+    - cron: "15 14 * * 1-5"   # EST catch-up
+    - cron: "0 13 * * 1-5"    # EDT primary  (UTC-4): Mar-Nov
+    - cron: "15 13 * * 1-5"   # EDT catch-up
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Bypass the time/trading-day gate"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Run the full pipeline without sending to Telegram"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gold-daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt
+
+      # Persists data/state.json (the idempotency guard) across separate
+      # runner instances — e.g. between a primary trigger and its later
+      # catch-up trigger. GitHub Actions runners are ephemeral, so without
+      # this the guard would silently reset on every single run.
+      #
+      # Key/restore-keys are namespaced by github.event_name so that
+      # `schedule` runs and `workflow_dispatch` (manual) runs each keep
+      # their OWN separate idempotency history. This is intentional: a
+      # manual test/backfill run must never mark today's job "done" for
+      # the real scheduled run (and vice versa) — otherwise a manual run
+      # silently blocks the automatic one for the rest of the day.
+      - name: Restore idempotency state
+        uses: actions/cache@v4
+        with:
+          path: data/state.json
+          key: gold-daily-state-${{ github.event_name }}-${{ github.run_id }}
+          restore-keys: |
+            gold-daily-state-${{ github.event_name }}-
+
+      - name: Run Gold daily report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          PYTHONPATH: src
+        run: |
+          python -m bot.main --asset gold --mode daily \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
