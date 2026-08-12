@@ -1,9 +1,4 @@
-"""Application configuration loaded from environment variables (.env).
-
-Single source of truth for all tunables. Uses pydantic-settings so that
-missing/invalid required variables fail fast at startup with a clear
-error, instead of surfacing as a cryptic AttributeError deep in a job.
-"""
+"""Application configuration loaded from environment variables (.env)."""
 
 from __future__ import annotations
 
@@ -12,15 +7,17 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 AssetName = Literal["gold", "dow", "bitcoin"]
 ReportMode = Literal["daily", "weekly"]
 
-# yfinance ticker symbols for each supported asset.
+
 ASSET_SYMBOLS: dict[AssetName, str] = {
     "gold": "GC=F",
     "dow": "^DJI",
     "bitcoin": "BTC-USD",
 }
+
 
 ASSET_DISPLAY_NAMES: dict[AssetName, str] = {
     "gold": "Gold Futures (GC=F)",
@@ -28,8 +25,7 @@ ASSET_DISPLAY_NAMES: dict[AssetName, str] = {
     "bitcoin": "Bitcoin (BTC-USD)",
 }
 
-# Preferred model first, then progressively safer fallbacks. If GEMINI_MODEL
-# is set explicitly, it is tried before this list.
+
 DEFAULT_GEMINI_MODEL_CHAIN = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
@@ -41,82 +37,140 @@ DEFAULT_GEMINI_MODEL_CHAIN = [
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # --- Telegram ---
-    telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
-    telegram_chat_id: str = Field(..., alias="TELEGRAM_CHAT_ID")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    # --- Gemini ---
-    gemini_api_key: str = Field(..., alias="GEMINI_API_KEY")
-    gemini_model: str | None = Field(default=None, alias="GEMINI_MODEL")
+    # Telegram
+    telegram_bot_token: str = Field(
+        ...,
+        alias="TELEGRAM_BOT_TOKEN",
+    )
 
-    # --- News filter ---
+    telegram_chat_id: str = Field(
+        ...,
+        alias="TELEGRAM_CHAT_ID",
+    )
+
+    # Gemini
+    gemini_api_key: str = Field(
+        ...,
+        alias="GEMINI_API_KEY",
+    )
+
+    gemini_model: str | None = Field(
+        default=None,
+        alias="GEMINI_MODEL",
+    )
+
+    # News
     news_calendar_url: str = Field(
         default="https://nodedata.forexfactory.com/forex-calendar/weekly.json",
         alias="NEWS_CALENDAR_URL",
     )
 
-    # --- Scheduling tolerance ---
-    # Minutes *before* the ideal target time that still count as "due".
-    # Kept narrow so an early/spurious trigger (e.g. manual dispatch spam)
-    # doesn't fire prematurely.
-    schedule_tolerance_minutes: int = Field(default=7, alias="SCHEDULE_TOLERANCE_MINUTES")
+    # ---------------------------------------------------------
+    # Scheduling
+    # ---------------------------------------------------------
 
-    # Minutes *after* the ideal target time that still count as "due".
-    # GitHub Actions scheduled workflows can be delayed by GitHub itself
-    # (documented, especially under platform load); each workflow also
-    # schedules a later "catch-up" cron trigger so a delayed primary run
-    # still gets a second chance within this window. state_store prevents
-    # a duplicate send if the primary run already succeeded.
-    catch_up_minutes: int = Field(default=20, alias="CATCH_UP_MINUTES")
+    # How early the job may run.
+    #
+    # Kept intentionally small so the wrong DST cron line
+    # cannot accidentally trigger the report.
+    schedule_tolerance_minutes: int = Field(
+        default=7,
+        alias="SCHEDULE_TOLERANCE_MINUTES",
+    )
 
-    # --- Market data ---
-    yfinance_interval: str = Field(default="1m", alias="YFINANCE_INTERVAL")
+    # How late the job may run.
+    #
+    # GitHub Actions scheduled jobs are best-effort and can
+    # start later than the cron timestamp.
+    catch_up_minutes: int = Field(
+        default=45,
+        alias="CATCH_UP_MINUTES",
+    )
 
-    # --- Logging ---
-    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    # Market data
+    yfinance_interval: str = Field(
+        default="1m",
+        alias="YFINANCE_INTERVAL",
+    )
 
-    # --- State store ---
-    state_file_path: str = Field(default="data/state.json", alias="STATE_FILE_PATH")
+    # Logging
+    log_level: str = Field(
+        default="INFO",
+        alias="LOG_LEVEL",
+    )
 
-    @field_validator("telegram_bot_token", "gemini_api_key")
+    # State
+    #
+    # IMPORTANT:
+    # Each workflow supplies its own STATE_FILE_PATH.
+    state_file_path: str = Field(
+        default="data/state.json",
+        alias="STATE_FILE_PATH",
+    )
+
+    @field_validator(
+        "telegram_bot_token",
+        "gemini_api_key",
+    )
     @classmethod
     def _not_blank(cls, v: str) -> str:
+
         if not v or not v.strip():
             raise ValueError("must not be blank")
+
         return v
 
     @field_validator("news_calendar_url")
     @classmethod
     def _https_only(cls, v: str) -> str:
+
         if not v.startswith("https://"):
-            raise ValueError("NEWS_CALENDAR_URL must use https://")
+            raise ValueError(
+                "NEWS_CALENDAR_URL must use https://"
+            )
+
         return v
 
     def gemini_model_chain(self) -> list[str]:
-        """Returns the ordered list of model names to try.
+        """Return ordered Gemini model fallback chain."""
 
-        If GEMINI_MODEL is explicitly set, it takes priority, followed by
-        the built-in fallback chain (deduplicated, order preserved).
-        """
-        chain = ([self.gemini_model] if self.gemini_model else []) + DEFAULT_GEMINI_MODEL_CHAIN
+        chain = (
+            [self.gemini_model]
+            if self.gemini_model
+            else []
+        ) + DEFAULT_GEMINI_MODEL_CHAIN
+
         seen: set[str] = set()
         ordered: list[str] = []
-        for m in chain:
-            if m not in seen:
-                seen.add(m)
-                ordered.append(m)
+
+        for model in chain:
+
+            if model not in seen:
+                seen.add(model)
+                ordered.append(model)
+
         return ordered
 
 
 def load_settings() -> Settings:
-    """Loads and validates settings, raising ConfigError with a clear message on failure."""
+    """Load and validate settings."""
+
     from pydantic import ValidationError
 
     from .exceptions import ConfigError
 
     try:
         return Settings()  # type: ignore[call-arg]
+
     except ValidationError as exc:
-        raise ConfigError(f"Invalid or missing configuration: {exc}") from exc
+
+        raise ConfigError(
+            f"Invalid or missing configuration: {exc}"
+        ) from exc
