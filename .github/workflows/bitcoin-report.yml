@@ -2,23 +2,27 @@ name: Bitcoin Daily Report
 
 on:
   schedule:
-    # 21:00 Asia/Tehran = 17:30 UTC (fixed offset, no DST since 2022),
-    # primary + a +15min catch-up backstop against GitHub Actions delay.
+    # 21:00 Asia/Tehran = 17:30 UTC
+
     - cron: "30 17 * * *"
     - cron: "45 17 * * *"
+    - cron: "0 18 * * *"
+    - cron: "15 18 * * *"
+
   workflow_dispatch:
     inputs:
       force:
-        description: "Bypass the time gate"
+        description: "Bypass time gate"
         type: boolean
         default: false
+
       dry_run:
-        description: "Run the full pipeline without sending to Telegram"
+        description: "Run without sending Telegram"
         type: boolean
         default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: bitcoin-daily-report
@@ -26,25 +30,25 @@ concurrency:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
 
-      - run: pip install -r requirements.txt
-
-      - name: Restore idempotency state
-        uses: actions/cache@v4
-        with:
-          path: data/state.json
-          key: bitcoin-daily-state-${{ github.event_name }}-${{ github.run_id }}
-          restore-keys: |
-            bitcoin-daily-state-${{ github.event_name }}-
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run Bitcoin daily report
         env:
@@ -52,8 +56,28 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          STATE_FILE_PATH: data/state_bitcoin_daily.json
           PYTHONPATH: src
         run: |
           python -m bot.main --asset bitcoin --mode daily \
-            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
-            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+            ${{ inputs.force && '--force' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Commit updated state
+        if: success() && inputs.dry_run != true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/state_bitcoin_daily.json
+
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+
+          git commit -m "chore: update bitcoin daily state"
+
+          git pull --rebase origin main
+
+          git push
