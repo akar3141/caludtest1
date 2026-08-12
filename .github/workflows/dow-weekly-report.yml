@@ -2,22 +2,27 @@ name: Dow Weekly Report
 
 on:
   schedule:
-    # Saturday 18:00 Asia/Tehran = 14:30 UTC, primary + +15min catch-up.
+    # Saturday 18:00 Tehran = 14:30 UTC
+
     - cron: "30 14 * * 6"
     - cron: "45 14 * * 6"
+    - cron: "0 15 * * 6"
+    - cron: "15 15 * * 6"
+
   workflow_dispatch:
     inputs:
       force:
-        description: "Bypass the time gate"
+        description: "Bypass time gate"
         type: boolean
         default: false
+
       dry_run:
-        description: "Run the full pipeline without sending to Telegram"
+        description: "Run without sending Telegram"
         type: boolean
         default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: dow-weekly-report
@@ -25,25 +30,25 @@ concurrency:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
 
-      - run: pip install -r requirements.txt
-
-      - name: Restore idempotency state
-        uses: actions/cache@v4
-        with:
-          path: data/state.json
-          key: dow-weekly-state-${{ github.event_name }}-${{ github.run_id }}
-          restore-keys: |
-            dow-weekly-state-${{ github.event_name }}-
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run Dow weekly report
         env:
@@ -51,8 +56,28 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          STATE_FILE_PATH: data/state_dow_weekly.json
           PYTHONPATH: src
         run: |
           python -m bot.main --asset dow --mode weekly \
-            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
-            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+            ${{ inputs.force && '--force' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Commit updated state
+        if: success() && inputs.dry_run != true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/state_dow_weekly.json
+
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+
+          git commit -m "chore: update dow weekly state"
+
+          git pull --rebase origin main
+
+          git push
