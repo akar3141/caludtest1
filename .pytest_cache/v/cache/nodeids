@@ -1,0 +1,17 @@
+[
+  "tests/test_news_filter.py::test_impact_matching_is_case_insensitive_substring",
+  "tests/test_news_filter.py::test_non_usd_or_low_impact_excluded",
+  "tests/test_news_filter.py::test_parses_standard_dateline_field",
+  "tests/test_news_filter.py::test_partial_parse_failures_are_skipped_not_fatal",
+  "tests/test_news_filter.py::test_schema_drift_raises_when_all_items_unparseable",
+  "tests/test_statistical_analyzer.py::test_daily_session_stats_basic_invariants",
+  "tests/test_statistical_analyzer.py::test_weekly_stats_basic_invariants",
+  "tests/test_statistical_analyzer.py::test_weekly_stats_strongest_and_weakest_day_are_consistent",
+  "tests/test_time_manager.py::test_is_due_accepts_realistic_github_delay",
+  "tests/test_time_manager.py::test_is_due_accepts_within_symmetric_window",
+  "tests/test_time_manager.py::test_is_due_catch_up_window_covers_delayed_trigger",
+  "tests/test_time_manager.py::test_is_due_rejects_too_early",
+  "tests/test_time_manager.py::test_is_due_rejects_wrong_dst_line",
+  "tests/test_time_manager.py::test_ny_open_uses_correct_offset_winter_and_summer",
+  "tests/test_time_manager.py::test_target_before_ny_open_matches_expected_utc_time"
+]
