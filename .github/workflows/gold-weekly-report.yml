@@ -1,0 +1,91 @@
+name: Gold Weekly Report
+
+on:
+  schedule:
+    # GitHub Actions cron is best-effort. Run every 15 minutes in a retry window;
+    # Python applies the exact DST/timezone-aware target and idempotency state.
+    - cron: "*/15 13-16 * * 6"
+
+
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Manual test only: bypass time/trading-day gate"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Manual test only: run without sending Telegram"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-weekly-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run gold weekly report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          STATE_FILE_PATH: data/state_gold_weekly.json
+          PYTHONPATH: src
+        run: |
+          CMD="python -m bot.main --asset gold --mode weekly"
+
+          # Scheduled runs can NEVER bypass the Python time gate.
+          # --force is available only for an explicit manual workflow_dispatch.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            CMD="$CMD --force"
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+
+          echo "event=${{ github.event_name }}"
+          echo "command=$CMD"
+          $CMD
+
+      - name: Commit updated state
+        if: success() && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A skipped run may legitimately have no state file. Do not fail the workflow.
+          if [ -f data/state_gold_weekly.json ]; then
+            git add data/state_gold_weekly.json
+          fi
+
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+
+          git commit -m "chore: update gold weekly state"
+          git pull --rebase origin main
+          git push

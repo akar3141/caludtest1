@@ -1,0 +1,91 @@
+name: Dow Daily Report
+
+on:
+  schedule:
+    # GitHub Actions cron is best-effort. Run every 15 minutes in a retry window;
+    # Python applies the exact DST/timezone-aware target and idempotency state.
+    - cron: "*/15 13-16 * * 1-5"
+
+
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Manual test only: bypass time/trading-day gate"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Manual test only: run without sending Telegram"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dow-daily-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run dow daily report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          STATE_FILE_PATH: data/state_dow_daily.json
+          PYTHONPATH: src
+        run: |
+          CMD="python -m bot.main --asset dow --mode daily"
+
+          # Scheduled runs can NEVER bypass the Python time gate.
+          # --force is available only for an explicit manual workflow_dispatch.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            CMD="$CMD --force"
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+
+          echo "event=${{ github.event_name }}"
+          echo "command=$CMD"
+          $CMD
+
+      - name: Commit updated state
+        if: success() && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A skipped run may legitimately have no state file. Do not fail the workflow.
+          if [ -f data/state_dow_daily.json ]; then
+            git add data/state_dow_daily.json
+          fi
+
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+
+          git commit -m "chore: update dow daily state"
+          git pull --rebase origin main
+          git push
