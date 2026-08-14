@@ -1,0 +1,11 @@
+{
+  "tests/test_message_formatter.py": true,
+  "tests/test_news_filter.py::test_parses_standard_dateline_field": true,
+  "tests/test_news_filter.py::test_impact_matching_is_case_insensitive_substring": true,
+  "tests/test_news_filter.py::test_non_usd_or_low_impact_excluded": true,
+  "tests/test_news_filter.py::test_schema_drift_raises_when_all_items_unparseable": true,
+  "tests/test_news_filter.py::test_partial_parse_failures_are_skipped_not_fatal": true,
+  "tests/test_statistical_analyzer.py::test_daily_session_stats_basic_invariants": true,
+  "tests/test_statistical_analyzer.py::test_weekly_stats_basic_invariants": true,
+  "tests/test_statistical_analyzer.py::test_weekly_stats_strongest_and_weakest_day_are_consistent": true
+}
